@@ -1,0 +1,210 @@
+
+#include <lpc214x.h>
+
+/* ================= LCD PIN DEFINITIONS ================= */
+
+#define LCD_PORT  0x00FF0000
+#define EN        (1U << 10)    // P0.10
+#define RS        (1U << 11)    // P0.11
+#define RW        (1U << 20)    // P0.20
+#define LCD_SHIFT 16
+
+/* ================= KEYPAD PIN DEFINITIONS ============== */
+
+#define Col0 (1U << 12)
+#define Col1 (1U << 13)
+#define Col2 (1U << 14)
+#define Col3 (1U << 15)
+
+#define Row0 (1U << 16)
+#define Row1 (1U << 17)
+#define Row2 (1U << 18)
+#define Row3 (1U << 19)
+
+unsigned int ROW[] = {Row0, Row1, Row2, Row3};
+unsigned int COL[] = {Col0, Col1, Col2, Col3};
+
+unsigned int KeyCodes[] = {
+    '1', '4', '7', '*',
+    '2', '5', '8', '0',
+    '3', '6', '9', '#',
+    'A', 'B', 'C', 'D'
+};
+
+/* ================= DELAY =============================== */
+
+void delay(unsigned int time)
+{
+    unsigned int i, j;
+
+    for (i = 0; i < time; i++)
+        for (j = 0; j < 100; j++);
+}
+
+/* ================= LCD FUNCTIONS ======================= */
+
+void LCD_strobe(void)
+{
+    IOSET0 = EN;
+    delay(10);
+    IOCLR0 = EN;
+    delay(10);
+}
+
+void LCD_cmd(unsigned char ch)
+{
+    IOCLR0 = RS | RW;
+    IOCLR1 = LCD_PORT;
+    IOSET1 = ((unsigned int)ch << LCD_SHIFT);
+
+    LCD_strobe();
+
+    if (ch == 0x01 || ch == 0x02)
+        delay(200);
+}
+
+void LCD_data(unsigned char ch)
+{
+    IOSET0 = RS;
+    IOCLR0 = RW;
+    IOCLR1 = LCD_PORT;
+    IOSET1 = ((unsigned int)ch << LCD_SHIFT);
+
+    LCD_strobe();
+}
+
+void LCD_init(void)
+{
+    /* Configure LCD control pins as GPIO */
+    PINSEL0 &= ~((3U << 20) | (3U << 22));
+    PINSEL1 &= ~(3U << 8);
+
+    /* Port 1 used for LCD data */
+    PINSEL2 = 0;
+
+    IODIR0 |= EN | RS | RW;
+    IODIR1 |= LCD_PORT;
+
+    IOCLR0 = EN | RS | RW;
+    IOCLR1 = LCD_PORT;
+
+    delay(2000);
+
+    LCD_cmd(0x38);    // 8-bit, 2-line mode
+    delay(200);
+    LCD_cmd(0x38);
+    delay(200);
+    LCD_cmd(0x38);
+
+    LCD_cmd(0x0C);    // Display ON, cursor OFF
+    LCD_cmd(0x06);    // Cursor increment
+    LCD_cmd(0x01);    // Clear display
+    delay(200);
+    LCD_cmd(0x80);    // First row
+}
+
+void LCD_display(int row, int pos, unsigned char *ch)
+{
+    unsigned char address;
+
+    if (row == 1)
+        address = 0x80 | (pos - 1);
+    else
+        address = 0xC0 | (pos - 1);
+
+    LCD_cmd(address);
+
+    while (*ch)
+        LCD_data(*ch++);
+}
+
+/* ================= KEYPAD FUNCTIONS ==================== */
+
+void kbddelay(unsigned int time)
+{
+    unsigned int i, j;
+
+    for (i = 0; i < time; i++)
+        for (j = 0; j < 100; j++);
+}
+
+void kbdInit(void)
+{
+    /* P0.12-P0.19 as GPIO */
+    PINSEL0 &= 0x00FFFFFF;
+    PINSEL1 &= 0xFFFFFF00;
+
+    /* Columns P0.12-P0.15 are outputs */
+    /* Rows P0.16-P0.19 are inputs */
+    IODIR0 &= ~0x000FF000;
+    IODIR0 |=  0x0000F000;
+
+    /* Set columns HIGH */
+    IOSET0 = 0x0000F000;
+}
+
+unsigned char GetKey(void)
+{
+    unsigned int col, rowdata, count;
+    unsigned char key;
+
+    for (col = 0; col < 4; col++)
+    {
+        /* Drive current column LOW */
+        IOCLR0 = COL[col];
+
+        kbddelay(10);
+        rowdata = (IOPIN0 >> 16) & 0x0F;
+
+        if (rowdata != 0x0F)
+        {
+            for (count = 0; count < 4; count++)
+            {
+                if ((rowdata & (1U << count)) == 0)
+                {
+                    key = KeyCodes[(col * 4) + count];
+
+                    /* Wait for key release */
+                    while (((IOPIN0 >> 16) & (1U << count)) == 0);
+
+                    kbddelay(20);
+                    IOSET0 = COL[col];
+
+                    return key;
+                }
+            }
+        }
+
+        /* Return column HIGH */
+        IOSET0 = COL[col];
+    }
+
+    return 0;
+}
+
+/* ================= MAIN PROGRAM ======================== */
+
+int main(void)
+{
+    unsigned char key;
+
+    LCD_init();
+    kbdInit();
+
+    LCD_display(1, 1, "Press a key:");
+
+    while (1)
+    {
+        key = GetKey();
+
+        if (key != 0)
+        {
+            /* Display pressed key on second row */
+            LCD_cmd(0xC0);
+            LCD_display(2, 1, "Key: ");
+
+            LCD_cmd(0xC5);
+            LCD_data(key);
+        }
+    }
+}

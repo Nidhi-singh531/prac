@@ -1,0 +1,173 @@
+
+#include <lpc214x.h>
+
+/* LCD pin definitions - your existing wiring */
+#define LCD_PORT  0x00FF0000
+#define EN        (1U << 10)   // P0.10
+#define RS        (1U << 11)   // P0.11
+#define RW        (1U << 20)   // P0.20
+#define LCD_SHIFT 16
+
+/* Delay */
+void delay(unsigned int time)
+{
+    unsigned int i, j;
+
+    for (i = 0; i < time; i++)
+        for (j = 0; j < 100; j++);
+}
+
+/* LCD enable pulse */
+void LCD_strobe(void)
+{
+    IOSET0 = EN;
+    delay(10);
+    IOCLR0 = EN;
+    delay(10);
+}
+
+/* Send LCD command */
+void LCD_cmd(unsigned char ch)
+{
+    IOCLR0 = RS | RW;
+    IOCLR1 = LCD_PORT;
+    IOSET1 = ((unsigned int)ch << LCD_SHIFT);
+
+    LCD_strobe();
+
+    if (ch == 0x01 || ch == 0x02)
+        delay(200);
+}
+
+/* Send LCD character */
+void LCD_data(unsigned char ch)
+{
+    IOSET0 = RS;
+    IOCLR0 = RW;
+    IOCLR1 = LCD_PORT;
+    IOSET1 = ((unsigned int)ch << LCD_SHIFT);
+
+    LCD_strobe();
+}
+
+/* Initialize LCD */
+void LCD_init(void)
+{
+    PINSEL0 &= ~((3U << 20) | (3U << 22));
+    PINSEL1 &= ~(3U << 8);
+    PINSEL2 = 0x00000000;
+
+    IODIR0 |= EN | RS | RW;
+    IODIR1 |= LCD_PORT;
+
+    IOCLR0 = EN | RS | RW;
+    IOCLR1 = LCD_PORT;
+
+    delay(2000);
+
+    LCD_cmd(0x38);
+    delay(200);
+    LCD_cmd(0x38);
+    delay(200);
+    LCD_cmd(0x38);
+    delay(200);
+
+    LCD_cmd(0x0C);
+    LCD_cmd(0x06);
+    LCD_cmd(0x01);
+    delay(200);
+    LCD_cmd(0x80);
+}
+
+/* Display string */
+void LCD_display(int row, int pos, unsigned char *ch)
+{
+    unsigned char address;
+
+    if (row == 1)
+        address = 0x80 | (pos - 1);
+    else
+        address = 0xC0 | (pos - 1);
+
+    LCD_cmd(address);
+
+    while (*ch)
+        LCD_data(*ch++);
+}
+
+/* ADC initialization: P0.28 = AD0.1 */
+void adcinit(void)
+{
+    PINSEL1 &= ~(3U << 24);
+    PINSEL1 |=  (1U << 24);
+}
+
+/* Read ADC */
+unsigned int adcread(unsigned char channel)
+{
+    unsigned int adc_data;
+
+    if (channel > 7)
+        return 0;
+
+    /* Select channel, CLKDIV=3, power up ADC */
+    AD0CR = (1U << channel) |
+            (3U << 8) |
+            (1U << 21);
+
+    /* Start conversion */
+    AD0CR |= (1U << 24);
+
+    /* Wait until conversion is complete */
+    while ((AD0GDR & (1U << 31)) == 0);
+
+    /* Extract 10-bit result */
+    adc_data = (AD0GDR >> 6) & 0x3FFU;
+
+    /* Stop conversion */
+    AD0CR &= ~(7U << 24);
+
+    return adc_data;
+}
+
+/* Display 10-bit ADC result as 0x000 to 0x3FF */
+void LCD_PrintHex(unsigned int num)
+{
+    int i;
+    unsigned int digit;
+
+    LCD_data('0');
+    LCD_data('x');
+
+    for (i = 2; i >= 0; i--)
+    {
+        digit = (num >> (i * 4)) & 0x0FU;
+
+        if (digit < 10)
+            LCD_data(digit + '0');
+        else
+            LCD_data(digit - 10 + 'A');
+    }
+}
+
+/* Main */
+int main(void)
+{
+    unsigned int adc_value;
+
+    LCD_init();
+    adcinit();
+
+    while (1)
+    {
+        adc_value = adcread(1);  // Read AD0.1
+
+        LCD_display(1, 1, "ADC VALUE:");
+
+        LCD_cmd(0xC0);           // Second LCD row
+        LCD_PrintHex(adc_value);
+        LCD_display(2, 7, "      ");
+
+        delay(100);
+    }
+}

@@ -1,0 +1,97 @@
+
+#include <lpc214x.h>
+
+/* UART0 initialization: 9600 baud, assuming PCLK = 15 MHz */
+void UART0_Init(void)
+{
+    PINSEL0 &= ~0x0000000F;
+    PINSEL0 |=  0x00000005;  // P0.0 = TXD0, P0.1 = RXD0
+
+    U0LCR = 0x83;            // 8-bit data, enable divisor access
+    U0DLM = 0;
+    U0DLL = 98;              // Approximately 9600 baud at 15 MHz PCLK
+    U0FDR = 0x10;            // Fractional divider disabled
+    U0LCR = 0x03;            // 8-bit, 1 stop bit, no parity
+    U0FCR = 0x07;            // Enable and reset FIFOs
+}
+
+/* Send one character */
+void UART0_TxChar(char ch)
+{
+    while (!(U0LSR & 0x20));
+    U0THR = ch;
+}
+
+/* Send a string */
+void UART0_TxString(const char *str)
+{
+    while (*str)
+        UART0_TxChar(*str++);
+}
+
+/* Print a two-digit number */
+void UART0_Print2(unsigned int value)
+{
+    UART0_TxChar('0' + (value / 10) % 10);
+    UART0_TxChar('0' + value % 10);
+}
+
+/* RTC initialization */
+void RTC_Init(void)
+{
+    CCR = 0x00;              // Disable RTC
+
+    PREINT  = 0x1C8;         // PCLK = 15 MHz
+    PREFRAC = 0x61C0;
+
+    CIIR = 0x00;             // Disable interrupts
+    AMR  = 0xFF;             // Disable alarm comparisons
+
+    CCR = 0x02;              // Reset RTC divider
+}
+
+/* Set time and start RTC */
+void RTC_SetTime(unsigned int hour,
+                 unsigned int min,
+                 unsigned int sec)
+{
+    SEC  = sec;
+    MIN  = min;
+    HOUR = hour;
+
+    CCR = 0x01;              // Start RTC
+}
+
+int main(void)
+{
+    unsigned int last_sec;
+
+    UART0_Init();
+    RTC_Init();
+
+    RTC_SetTime(5, 30, 1);
+
+    UART0_TxString("\r\nLPC2148 RTC Started\r\n");
+
+    last_sec = SEC;
+
+    while (1)
+    {
+        if (SEC != last_sec)
+        {
+            last_sec = SEC;
+
+            UART0_TxString("Time: ");
+
+            UART0_Print2(HOUR);
+            UART0_TxChar(':');
+
+            UART0_Print2(MIN);
+            UART0_TxChar(':');
+
+            UART0_Print2(SEC);
+
+            UART0_TxString("\r\n");
+        }
+    }
+}
