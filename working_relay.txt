@@ -1,0 +1,24 @@
+#include <reg51.h>
+
+sbit RELAY = P2^0;      // Relay control pin
+sbit BUZZER = P2^1;     // Buzzer control pin
+
+void delay(void)
+{
+    unsigned int i;
+    for(i = 0; i < 50000; i++);  // Software delay
+}
+
+void main(void)
+{
+    while(1)
+    {
+        RELAY = 1;      // Turn relay ON
+        BUZZER = 1;     // Turn buzzer ON
+        delay();
+
+        RELAY = 0;      // Turn relay OFF
+        BUZZER = 0;     // Turn buzzer OFF
+        delay();
+    }
+}
